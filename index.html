@@ -346,6 +346,142 @@
   </div>
 
   <script>
+    const SoundFX = (() => {
+      let ctx = null;
+      let spinTimer = null;
+
+      function getCtx() {
+        if (!ctx) {
+          ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        return ctx;
+      }
+
+      async function resume() {
+        const c = getCtx();
+        if (c.state === 'suspended') await c.resume();
+      }
+
+      function playClick(volume = 0.1, freq = 900) {
+        const c = getCtx();
+        const t = c.currentTime;
+        const osc = c.createOscillator();
+        const gain = c.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(volume, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+        osc.connect(gain);
+        gain.connect(c.destination);
+        osc.start(t);
+        osc.stop(t + 0.05);
+      }
+
+      function playWhoosh() {
+        const c = getCtx();
+        const t = c.currentTime;
+        const bufferSize = c.sampleRate * 0.35;
+        const buffer = c.createBuffer(1, bufferSize, c.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+        }
+        const source = c.createBufferSource();
+        source.buffer = buffer;
+        const filter = c.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(400, t);
+        filter.frequency.exponentialRampToValueAtTime(1800, t + 0.3);
+        filter.Q.value = 0.8;
+        const gain = c.createGain();
+        gain.gain.setValueAtTime(0.12, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+        source.connect(filter);
+        filter.connect(gain);
+        gain.connect(c.destination);
+        source.start(t);
+        source.stop(t + 0.36);
+      }
+
+      function stopSpin() {
+        if (spinTimer) {
+          clearTimeout(spinTimer);
+          spinTimer = null;
+        }
+      }
+
+      function playSpin(durationMs = 4000) {
+        stopSpin();
+        playWhoosh();
+        const start = performance.now();
+
+        function tick() {
+          const elapsed = performance.now() - start;
+          if (elapsed >= durationMs) return;
+          const progress = elapsed / durationMs;
+          const interval = 55 + progress * progress * 380;
+          const pitch = 700 + (1 - progress) * 500;
+          playClick(0.07 + (1 - progress) * 0.04, pitch);
+          spinTimer = setTimeout(tick, interval);
+        }
+
+        tick();
+      }
+
+      function playWin() {
+        const c = getCtx();
+        const t = c.currentTime;
+        const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+        notes.forEach((freq, i) => {
+          const start = t + i * 0.1;
+          const osc = c.createOscillator();
+          const gain = c.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, start);
+          gain.gain.setValueAtTime(0, start);
+          gain.gain.linearRampToValueAtTime(0.18, start + 0.03);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.45);
+          osc.connect(gain);
+          gain.connect(c.destination);
+          osc.start(start);
+          osc.stop(start + 0.5);
+        });
+      }
+
+      function playLose() {
+        const c = getCtx();
+        const t = c.currentTime;
+        const notes = [349.23, 311.13, 277.18, 233.08, 196];
+        notes.forEach((freq, i) => {
+          const start = t + i * 0.14;
+          const osc = c.createOscillator();
+          const gain = c.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(freq, start);
+          osc.frequency.exponentialRampToValueAtTime(freq * 0.92, start + 0.2);
+          gain.gain.setValueAtTime(0, start);
+          gain.gain.linearRampToValueAtTime(0.1, start + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.35);
+          osc.connect(gain);
+          gain.connect(c.destination);
+          osc.start(start);
+          osc.stop(start + 0.4);
+        });
+        const buzz = c.createOscillator();
+        const buzzGain = c.createGain();
+        buzz.type = 'triangle';
+        buzz.frequency.setValueAtTime(110, t + 0.55);
+        buzzGain.gain.setValueAtTime(0.08, t + 0.55);
+        buzzGain.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+        buzz.connect(buzzGain);
+        buzzGain.connect(c.destination);
+        buzz.start(t + 0.55);
+        buzz.stop(t + 0.92);
+      }
+
+      return { resume, playSpin, playWin, playLose, stopSpin };
+    })();
+
     const LABEL_RADIUS = 30;
 
     function positionSegmentLabels() {
@@ -386,8 +522,9 @@
     let currentRotation = 0;
     let spinning = false;
 
-    spinBtn.addEventListener('click', () => {
+    spinBtn.addEventListener('click', async () => {
       if (spinning) return;
+      await SoundFX.resume();
       spinning = true;
       spinBtn.disabled = true;
       result.textContent = '';
@@ -400,16 +537,25 @@
 
       currentRotation = totalRotation;
       setWheelRotation(totalRotation);
+      SoundFX.playSpin(4000);
 
       wheelSpinner.addEventListener('transitionend', onSpinEnd, { once: true });
 
       function onSpinEnd() {
+        SoundFX.stopSpin();
         spinning = false;
         spinBtn.disabled = false;
         const normalized = ((totalRotation % 360) + 360) % 360;
-        const landedIndex = Math.floor(((360 - normalized + 30) % 360) / 60) % 6;
+        const wheelAngle = (360 - normalized) % 360;
+        const landedIndex = Math.floor(wheelAngle / 60) % 6;
         const prize = segments[landedIndex];
-        result.textContent = prize === 'پوچ' ? 'متأسفانه پوچ شد!' : `تبریک! ${prize} بردید!`;
+        if (prize === 'پوچ') {
+          SoundFX.playLose();
+          result.textContent = 'متأسفانه پوچ شد!';
+        } else {
+          SoundFX.playWin();
+          result.textContent = `تبریک! ${prize} بردید!`;
+        }
       }
     });
   </script>
